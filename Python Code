@@ -60,7 +60,8 @@ for epoch in range(500):  # Train for 500 epochs
     loss.backward()  # Backpropagation to compute gradients
     optimizer.step()  # Update the model's parameters
 
-    if epoch % 10 == 0:  # Print the loss every 10 epochs
+    # Print the loss every 50 epochs
+    if epoch % 50 == 0:
         print(f'Epoch {epoch}, Loss: {loss.item()}')
 
 # Step 9: Evaluate the model on the test set
