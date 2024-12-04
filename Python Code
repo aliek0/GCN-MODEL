@@ -1,67 +1,75 @@
 import torch
-import torch_geometric
 import torch.nn.functional as F
-from torch_geometric.nn import GCNConv
+import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
-import numpy as np
-from sklearn.preprocessing import LabelEncoder
+from torch_geometric.nn import GCNConv
+from torch_geometric.utils import from_networkx
 
-# Sample graph with 8 nodes (individuals) and 12 edges (connections between them)
+# Step 1: Set a fixed random seed to ensure reproducibility
+torch.manual_seed(42)
+
+# Step 2: Create a simple graph (8 nodes, 12 edges)
 G = nx.Graph()
 G.add_edges_from([(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7), (7, 0),
                   (1, 3), (2, 4), (3, 5), (4, 6)])
 
-# Create adjacency matrix
-adj_matrix = nx.adjacency_matrix(G).todense()
+# Step 3: Convert the graph to PyTorch Geometric format
+data = from_networkx(G)
 
-# Nodes features - Random values for simplicity
-node_features = torch.rand((8, 16))  # 8 nodes, 16 features per node
+# Step 4: Assign random node features and labels to the graph
+node_features = torch.rand((8, 16))  # 8 nodes, each with 16 features
+labels = torch.randint(0, 2, (8,))   # Binary labels (0 or 1) for each node
 
-# Labels - For simplicity, we assign random labels
-labels = torch.randint(0, 2, (8,))  # Binary labels (0 or 1)
+# Assign node features and labels to the graph object
+data.x = node_features
+data.y = labels
 
-# Train and test split
+# Step 5: Split the data into training and testing sets
 train_mask = torch.tensor([True, True, True, True, False, False, False, False])
 test_mask = torch.tensor([False, False, False, False, True, True, True, True])
+data.train_mask = train_mask
+data.test_mask = test_mask
 
-# Graph Convolutional Network (GCN) Model Definition
+# Step 6: Define the Graph Convolutional Network (GCN) model
 class GCN(torch.nn.Module):
     def __init__(self, in_channels, out_channels):
         super(GCN, self).__init__()
-        self.conv1 = GCNConv(in_channels, 32)  # First GCN layer with 32 hidden units
-        self.conv2 = GCNConv(32, out_channels)  # Second GCN layer with output channels
+        self.conv1 = GCNConv(in_channels, 64)  # First GCN layer with 64 hidden units
+        self.conv2 = GCNConv(64, out_channels)  # Second GCN layer (output layer)
+        self.dropout = torch.nn.Dropout(p=0.5)  # Dropout layer with 50% probability
 
     def forward(self, x, edge_index):
-        x = self.conv1(x, edge_index)
+        x = self.conv1(x, edge_index)  # Apply first GCN layer
         x = F.relu(x)  # Apply ReLU activation function
-        x = self.conv2(x, edge_index)
+        x = self.dropout(x)  # Apply dropout after ReLU activation
+        x = self.conv2(x, edge_index)  # Apply second GCN layer
         return x
 
-# Model, Optimizer, and Loss Function
-model = GCN(in_channels=16, out_channels=2)  # 16 input features, 2 output classes (binary classification)
-optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
-criterion = torch.nn.CrossEntropyLoss()  # Loss function for classification
+# Step 7: Instantiate the model, loss function, and optimizer
+model = GCN(in_channels=16, out_channels=2)  # 16 input features, 2 output classes
+optimizer = torch.optim.Adam(model.parameters(), lr=0.005)  # Adam optimizer with learning rate 0.005
+criterion = torch.nn.CrossEntropyLoss()  # Cross entropy loss for classification
 
-# Training Loop
-for epoch in range(200):  # Training for 200 epochs
-    model.train()
-    optimizer.zero_grad()
-    out = model(node_features, torch.tensor(np.array(G.edges)).t().contiguous())
-    loss = criterion(out[train_mask], labels[train_mask])  # Compute loss using only training nodes
-    loss.backward()
-    optimizer.step()
-    
-    if epoch % 10 == 0:
+# Step 8: Training loop
+for epoch in range(500):  # Train for 500 epochs
+    model.train()  # Set the model to training mode
+    optimizer.zero_grad()  # Clear previous gradients
+    out = model(data.x, data.edge_index)  # Get the output from the GCN model
+    loss = criterion(out[data.train_mask], data.y[data.train_mask])  # Calculate loss using the training data
+    loss.backward()  # Backpropagation to compute gradients
+    optimizer.step()  # Update the model's parameters
+
+    if epoch % 10 == 0:  # Print the loss every 10 epochs
         print(f'Epoch {epoch}, Loss: {loss.item()}')
 
-# Testing the model
-model.eval()  # Set model to evaluation mode
-pred = model(node_features, torch.tensor(np.array(G.edges)).t().contiguous()).argmax(dim=1)
-correct = (pred[test_mask] == labels[test_mask]).sum()  # Compare predictions to true labels for test nodes
-accuracy = correct.item() / test_mask.sum().item()
+# Step 9: Evaluate the model on the test set
+model.eval()  # Set the model to evaluation mode
+pred = model(data.x, data.edge_index).argmax(dim=1)  # Get the predicted labels (most likely class)
+correct = (pred[data.test_mask] == data.y[data.test_mask]).sum()  # Count the number of correct predictions
+accuracy = correct.item() / data.test_mask.sum().item()  # Calculate the accuracy
 print(f'Test Accuracy: {accuracy:.4f}')
 
-# Plotting the graph
-nx.draw(G, with_labels=True, node_color=labels.numpy(), cmap=plt.cm.RdYlBu)
+# Step 10: Visualize the graph with node colors based on their labels
+nx.draw(G, with_labels=True, node_color=labels.numpy(), cmap=plt.cm.RdYlBu)  # Draw the graph
 plt.show()
